@@ -110,8 +110,13 @@ const listFiltersSchema = z.object({
         .enum(["id", "expPerHp", "expReward", "goldReward", "maxHp"])
         .optional(),
     sortDirection: z.enum(["asc", "desc"]).optional(),
-    limit: z.coerce.number().int().min(1).max(200).optional(),
-    page: z.coerce.number().int().min(1).optional(),
+limit: z.coerce.number().int().min(1).max(200).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  /**
+   * Devuelve el catalogo completo en una sola pagina. El editor visual lo
+   * necesita para buscar y filtrar del lado del cliente sobre los 340 NPCs.
+   */
+  all: z.preprocess((value) => value === true || value === "true", z.boolean().optional()),
 });
 
 function isHostileNpc(data: GameNpcRecordData): boolean {
@@ -305,8 +310,8 @@ export async function listGameNpcs(filters: unknown) {
     const parsed = listFiltersSchema.parse(filters ?? {});
     const values: Array<string | number> = [];
     const conditions: string[] = [];
-    const pageSize = parsed.limit ?? 100;
-    const page = parsed.page ?? 1;
+    const pageSize = parsed.all ? 100_000 : (parsed.limit ?? 100);
+    const page = parsed.all ? 1 : (parsed.page ?? 1);
     const offset = (page - 1) * pageSize;
 
     if (parsed.search) {

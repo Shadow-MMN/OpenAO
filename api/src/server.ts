@@ -100,12 +100,17 @@ import {
     discardDrafts,
     getGraphicContent,
     getMapStatus,
+    getMapTerrainPalette,
     listGraphics,
     listMapOverrides,
+    listMapTileEntities,
     paintTiles,
     paintTilesSchema,
+    placeTileEntity,
     publishMap,
+    removeTileEntity,
     revertMap,
+    tileEntitySchema,
     uploadGraphic,
 } from "./repositories/worldBuilder";
 import { MAX_PNG_BYTES } from "./lib/pngValidation";
@@ -919,36 +924,66 @@ app.delete(
  * va a quedar el mapa antes de publicarlo, sin ninguna pantalla especial.
  */
 app.get("/maps/:mapNum/overrides", async (request, response) => {
-    try {
-        const mapNum = Number.parseInt(request.params.mapNum ?? "", 10);
+     try {
+         const mapNum = Number.parseInt(request.params.mapNum ?? "", 10);
 
-        if (!Number.isInteger(mapNum) || mapNum <= 0) {
-            response.status(400).json({ error: "Numero de mapa invalido." });
-            return;
-        }
+         if (!Number.isInteger(mapNum) || mapNum <= 0) {
+             response.status(400).json({ error: "Numero de mapa invalido." });
+             return;
+         }
 
-        let includeDrafts = false;
+         let includeDrafts = false;
 
-        try {
-            const authorized = await getAuthorizedSession(request);
-            includeDrafts = Boolean(
-                authorized && isAuthorizedGameDataAdmin(authorized.session),
-            );
-        } catch {
-            // Sin sesion valida se sirve lo publicado, que es el caso normal.
-        }
+         try {
+             const authorized = await getAuthorizedSession(request);
+             includeDrafts = Boolean(
+                 authorized && isAuthorizedGameDataAdmin(authorized.session),
+             );
+         } catch {
+             // Sin sesion valida se sirve lo publicado, que es el caso normal.
+         }
 
-        response.json({
-            mapNum,
-            includeDrafts,
-            overrides: await listMapOverrides(mapNum, includeDrafts),
-        });
-    } catch (error) {
-        const message =
-            error instanceof Error ? error.message : "Unexpected error";
-        response.status(400).json({ error: message });
-    }
-});
+         response.json({
+             mapNum,
+             includeDrafts,
+             overrides: await listMapOverrides(mapNum, includeDrafts),
+             entities: await listMapTileEntities(mapNum, includeDrafts),
+         });
+     } catch (error) {
+         const message =
+             error instanceof Error ? error.message : "Unexpected error";
+         response.status(400).json({ error: message });
+     }
+ });
+
+ /** Overrides y entidades de un mapa con sesion de admin (editor visual). */
+ app.get(
+     "/admin/game-data/maps/:mapNum/overrides",
+     async (request, response) => {
+         try {
+             const authorized = await requireAdminEmailSession(request, response);
+             if (!authorized) return;
+
+             const mapNum = Number.parseInt(request.params.mapNum ?? "", 10);
+
+             if (!Number.isInteger(mapNum) || mapNum <= 0) {
+                 response.status(400).json({ error: "Numero de mapa invalido." });
+                 return;
+             }
+
+             response.json({
+                 mapNum,
+                 includeDrafts: true,
+                 overrides: await listMapOverrides(mapNum, true),
+                 entities: await listMapTileEntities(mapNum, true),
+             });
+         } catch (error) {
+             const message =
+                 error instanceof Error ? error.message : "Unexpected error";
+             response.status(400).json({ error: message });
+         }
+     },
+ );
 
 /** Publica los borradores de un mapa. A partir de aca los ven los jugadores. */
 app.post("/admin/game-data/maps/:mapNum/publish", async (request, response) => {
@@ -1038,6 +1073,117 @@ app.get("/admin/game-data/maps/:mapNum/status", async (request, response) => {
         response.status(400).json({ error: message });
     }
 });
+
+/**
+ * Paleta de tiles disponibles para el mapa actual: las entradas de la paleta
+ * fuente (terrain.json) mas los graficos subidos por administradores.
+ */
+app.get(
+    "/admin/game-data/maps/:mapNum/terrain",
+    async (request, response) => {
+        try {
+            const authorized = await requireAdminEmailSession(
+                request,
+                response,
+            );
+            if (!authorized) return;
+
+            const mapNum = Number.parseInt(request.params.mapNum ?? "", 10);
+
+            if (!Number.isInteger(mapNum) || mapNum <= 0) {
+                response.status(400).json({ error: "Numero de mapa invalido." });
+                return;
+            }
+
+            response.json(await getMapTerrainPalette(mapNum));
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : "Unexpected error";
+            response
+                .status(message.startsWith("El mapa") ? 404 : 400)
+                .json({ error: message });
+        }
+    },
+);
+
+/** Coloca un objeto o un NPC en un tile, como borrador. */
+app.put(
+    "/admin/game-data/maps/:mapNum/entities",
+    async (request, response) => {
+        try {
+            const authorized = await requireAdminEmailSession(
+                request,
+                response,
+            );
+            if (!authorized) return;
+
+            const mapNum = Number.parseInt(request.params.mapNum ?? "", 10);
+
+            if (!Number.isInteger(mapNum) || mapNum <= 0) {
+                response.status(400).json({ error: "Numero de mapa invalido." });
+                return;
+            }
+
+            const parsed = tileEntitySchema.safeParse(request.body);
+
+            if (!parsed.success) {
+                response
+                    .status(400)
+                    .json({ error: JSON.stringify(parsed.error.issues) });
+                return;
+            }
+
+            response.json(
+                await placeTileEntity(
+                    mapNum,
+                    parsed.data,
+                    authorized.session.account._id,
+                ),
+            );
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : "Unexpected error";
+            response.status(400).json({ error: message });
+        }
+    },
+);
+
+/** Quita el objeto o NPC colocado en un tile (solo borradores). */
+app.delete(
+    "/admin/game-data/maps/:mapNum/entities/:x/:y/:kind",
+    async (request, response) => {
+        try {
+            const authorized = await requireAdminEmailSession(
+                request,
+                response,
+            );
+            if (!authorized) return;
+
+            const mapNum = Number.parseInt(request.params.mapNum ?? "", 10);
+            const x = Number.parseInt(request.params.x ?? "", 10);
+            const y = Number.parseInt(request.params.y ?? "", 10);
+            const kind = request.params.kind ?? "";
+
+            if (
+                !Number.isInteger(mapNum) ||
+                !Number.isInteger(x) ||
+                !Number.isInteger(y) ||
+                (kind !== "obj" && kind !== "npc")
+            ) {
+                response.status(400).json({ error: "Parametros invalidos." });
+                return;
+            }
+
+            response.json({
+                removed: await removeTileEntity(mapNum, x, y, kind),
+            });
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : "Unexpected error";
+            response.status(400).json({ error: message });
+        }
+    },
+);
 
 app.get(
     "/internal/game-data/objects",

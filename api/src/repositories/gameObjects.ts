@@ -25,6 +25,11 @@ const listFiltersSchema = z.object({
   objType: z.coerce.number().int().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   page: z.coerce.number().int().min(1).optional(),
+  /**
+   * Devuelve el catalogo completo en una sola pagina. El editor visual lo
+   * necesita para buscar y filtrar del lado del cliente sobre 1.062 objetos.
+   */
+  all: z.preprocess((value) => value === true || value === "true", z.boolean().optional()),
 });
 
 let seedPromise: Promise<void> | null = null;
@@ -93,13 +98,14 @@ export async function getCurrentGameObjectVersion(): Promise<number> {
 }
 
 function toGameObjectSummary(row: GameObjectRow) {
-  return {
-    id: row.id,
-    name: row.name,
-    objType: row.obj_type,
-    version: Number(row.version),
-    updatedAt: row.updated_at.toISOString(),
-  };
+    return {
+        id: row.id,
+        name: row.name,
+        objType: row.obj_type,
+        grhIndex: Number(row.data.grhIndex ?? 0),
+        version: Number(row.version),
+        updatedAt: row.updated_at.toISOString(),
+    };
 }
 
 export async function listGameObjects(filters: unknown) {
@@ -107,8 +113,8 @@ export async function listGameObjects(filters: unknown) {
   const parsed = listFiltersSchema.parse(filters ?? {});
   const values: Array<string | number> = [];
   const conditions: string[] = [];
-  const pageSize = parsed.limit ?? 100;
-  const page = parsed.page ?? 1;
+  const pageSize = parsed.all ? 100_000 : (parsed.limit ?? 100);
+  const page = parsed.all ? 1 : (parsed.page ?? 1);
   const offset = (page - 1) * pageSize;
 
   if (parsed.search) {

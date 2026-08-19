@@ -11,6 +11,7 @@ import {
     LogIn,
     LogOut,
     MessageCircle,
+    Hammer,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AuthErrorResponse, AuthSession } from "@/lib/auth";
@@ -129,6 +130,19 @@ export default function AppChrome({ children }: AppChromeProps) {
                                 </Link>
                             );
                         })}
+                        {session ? (
+                            <Link
+                                href="/construccion"
+                                className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm transition ${
+                                    isActivePath(pathname, "/construccion")
+                                        ? "bg-amber-300/12 text-amber-300"
+                                        : "text-stone-400 hover:bg-white/5 hover:text-stone-100"
+                                }`}
+                            >
+                                <Hammer className="h-4 w-4" />
+                                Construccion
+                            </Link>
+                        ) : null}
                     </nav>
 
                     <div className="flex items-center gap-3">
