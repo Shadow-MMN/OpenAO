@@ -17,6 +17,7 @@ import type {
     MapTileEntity,
     MapTileOverride,
     TerrainPalette,
+    TerrainPaletteEntry,
 } from "./editorApi";
 import {
     getMapOverrides,
@@ -25,9 +26,85 @@ import {
     listEditorNpcs,
     listEditorObjects,
 } from "./editorApi";
+import { UPLOADED_GRAPHIC_INDEX_START } from "../../utils/gameLoader";
+
+/**
+ * Pincel de terreno.
+ *
+ * Una entrada de la paleta describe el tile completo, no un solo grafico: lleva
+ * un grafico por capa y si bloquea el paso. Pintar solo la capa 1 dejaria el
+ * arbol de la capa 3 encima del piso nuevo.
+ */
+export type TerrainBrush = {
+    paletteId: number;
+    /** Grafico por capa, desde la capa 1. `null` vacia esa capa. */
+    graphics: Array<number | null>;
+    blocked: boolean;
+    /** Grafico representativo, para miniaturas y recientes. */
+    grhIndex: number;
+};
+
+/**
+ * Pincel de una entrada de la paleta del mapa.
+ *
+ * Las capas que la entrada no menciona quedan fuera del pincel y no se tocan al
+ * pintar; los `null` internos si vacian esa capa, porque forman parte de como se
+ * ve el tile (un piso con arbol en la capa 3 y nada en la 2).
+ */
+export function createTerrainBrush(entry: TerrainPaletteEntry): TerrainBrush {
+    const representative = entry.graphics.find(
+        (graphic): graphic is number =>
+            typeof graphic === "number" && graphic > 0,
+    );
+
+    return {
+        paletteId: entry.id,
+        graphics: entry.graphics,
+        blocked: entry.blocked,
+        grhIndex: representative ?? 0,
+    };
+}
+
+/**
+ * Pincel de un grafico subido. Cada PNG subido es un tile entero, asi que ocupa
+ * la capa del piso y no bloquea por si mismo.
+ */
+export function createUploadedGraphicBrush(grhIndex: number): TerrainBrush {
+    return {
+        paletteId: grhIndex,
+        graphics: [grhIndex],
+        blocked: false,
+        grhIndex,
+    };
+}
+
+/**
+ * Rearma un pincel a partir de su id. Lo necesitan los recientes y la barra de
+ * herramientas, que guardan el id y no el pincel entero.
+ */
+export function findTerrainBrush(
+    terrain: TerrainPalette | null,
+    paletteId: number,
+): TerrainBrush | null {
+    const entry = terrain?.palette.find(
+        (candidate) => candidate.id === paletteId,
+    );
+
+    if (entry) {
+        return createTerrainBrush(entry);
+    }
+
+    // Un grafico subido se puede pintar igual aunque no venga en la paleta de
+    // este mapa: la lista de subidos tiene tope y el indice ya alcanza.
+    if (paletteId >= UPLOADED_GRAPHIC_INDEX_START) {
+        return createUploadedGraphicBrush(paletteId);
+    }
+
+    return null;
+}
 
 export type EditorTool =
-    | { kind: "terrain"; paletteId: number; grhIndex: number }
+    | ({ kind: "terrain" } & TerrainBrush)
     | { kind: "object"; object: EditorObject }
     | { kind: "npc"; npc: EditorNpc }
     | { kind: "erase" };
@@ -142,8 +219,8 @@ export function EditorStoreProvider({
                 return;
             }
 
-            setOverrides(overridesData.overrides);
-            setEntities(overridesData.entities);
+            setOverrides(overridesData.overrides ?? []);
+            setEntities(overridesData.entities ?? []);
             setStatus(statusData);
             setTerrain(terrainData);
         } catch (error) {

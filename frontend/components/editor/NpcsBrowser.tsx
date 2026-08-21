@@ -1,21 +1,52 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { BodiesDB, HeadsDB } from "../../types/game";
 import type { EditorNpc } from "../../lib/editor/editorApi";
 import { useEditorStore } from "../../lib/editor/editorStore";
-import CharacterSpritePreview from "../CharacterSpritePreview";
+import {
+    getSharedBodiesDB,
+    getSharedHeadsDB,
+    resolveCharacterThumbnailGrh,
+} from "../../lib/graphicTextures";
+import GraphicPreview from "./GraphicPreview";
 import VirtualizedList from "./VirtualizedList";
 
 const ITEM_HEIGHT = 76;
 
 /**
- * Catalogo de NPCs del juego. Los NPCs se previsualizan con el mismo
- * renderizado de personajes del cliente (CharacterSpritePreview).
+ * Catalogo de NPCs del juego.
+ *
+ * Las miniaturas resuelven el grafico del NPC contra los catalogos de cuerpos y
+ * cabezas y lo dibujan en un canvas 2D. No usan el renderizador de personajes
+ * del cliente a proposito: crea una `Application` de PixiJS -y con ella un
+ * contexto WebGL- por fila, y el navegador mantiene vivos apenas unos quince.
  */
 export default function NpcsBrowser() {
     const { npcs, tool, setTool, addRecent } = useEditorStore();
     const [search, setSearch] = useState("");
+    const [bodiesDB, setBodiesDB] = useState<BodiesDB | null>(null);
+    const [headsDB, setHeadsDB] = useState<HeadsDB | null>(null);
     const normalizedSearch = search.trim().toLowerCase();
+
+    useEffect(() => {
+        let cancelled = false;
+
+        Promise.all([getSharedBodiesDB(), getSharedHeadsDB()])
+            .then(([bodies, heads]) => {
+                if (!cancelled) {
+                    setBodiesDB(bodies);
+                    setHeadsDB(heads);
+                }
+            })
+            .catch(() => {
+                // Sin catalogos las miniaturas quedan vacias, la lista sirve igual.
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const filteredNpcs = useMemo(() => {
         if (!normalizedSearch) {
@@ -36,7 +67,14 @@ export default function NpcsBrowser() {
         addRecent({
             kind: "npc",
             id: entry.id,
-            grhIndex: entry.idHead,
+            // El grafico, no `idHead`: son numeraciones distintas y los
+            // recientes dibujan la miniatura con este valor.
+            grhIndex: resolveCharacterThumbnailGrh(
+                bodiesDB,
+                headsDB,
+                entry.idBody,
+                entry.idHead,
+            ),
             name: entry.name,
         });
     };
@@ -51,45 +89,53 @@ export default function NpcsBrowser() {
                 className="w-full rounded-lg border border-white/10 bg-stone-950/60 px-3 py-2 text-xs text-stone-200 placeholder:text-stone-500 focus:border-amber-400/50 focus:outline-none"
             />
 
-            <VirtualizedList
-                items={filteredNpcs}
-                getItemKey={(entry) => entry.id}
-                renderItem={(entry) => {
-                    const isSelected = selectedId === entry.id;
+            {filteredNpcs.length === 0 ? (
+                <p className="flex flex-1 items-center justify-center text-[11px] text-stone-500">
+                    Ningun NPC coincide con la busqueda.
+                </p>
+            ) : (
+                <VirtualizedList
+                    items={filteredNpcs}
+                    getItemKey={(entry) => entry.id}
+                    renderItem={(entry) => {
+                        const isSelected = selectedId === entry.id;
 
-                    return (
-                        <button
-                            type="button"
-                            onClick={() => handleSelect(entry)}
-                            className={`flex h-[72px] w-full items-center gap-2 rounded-lg border px-2 text-left transition ${
-                                isSelected
-                                    ? "border-amber-400/70 bg-amber-400/15"
-                                    : "border-transparent bg-stone-950/40 hover:border-white/10 hover:bg-stone-900/70"
-                            }`}
-                        >
-                            <div className="h-[64px] w-[52px] overflow-hidden rounded-md">
-                                <CharacterSpritePreview
-                                    bodyId={entry.idBody}
-                                    headId={entry.idHead}
-                                    scale={1.4}
-                                    mode="head"
+                        return (
+                            <button
+                                type="button"
+                                onClick={() => handleSelect(entry)}
+                                className={`flex h-[72px] w-full items-center gap-2 rounded-lg border px-2 text-left transition ${
+                                    isSelected
+                                        ? "border-amber-400/70 bg-amber-400/15"
+                                        : "border-transparent bg-stone-950/40 hover:border-white/10 hover:bg-stone-900/70"
+                                }`}
+                            >
+                                <GraphicPreview
+                                    grhIndex={resolveCharacterThumbnailGrh(
+                                        bodiesDB,
+                                        headsDB,
+                                        entry.idBody,
+                                        entry.idHead,
+                                    )}
+                                    size={56}
+                                    scale={1.8}
                                 />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                                <p className="truncate text-xs font-medium text-stone-200">
-                                    {entry.name}
-                                </p>
-                                <p className="text-[10px] text-stone-500">
-                                    #{entry.id} - Cuerpo {entry.idBody} / Cabeza{" "}
-                                    {entry.idHead}
-                                </p>
-                            </div>
-                        </button>
-                    );
-                }}
-                itemHeight={ITEM_HEIGHT}
-                className="min-h-0 flex-1 rounded-lg"
-            />
+                                <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs font-medium text-stone-200">
+                                        {entry.name}
+                                    </p>
+                                    <p className="text-[10px] text-stone-500">
+                                        #{entry.id} - Cuerpo {entry.idBody} / Cabeza{" "}
+                                        {entry.idHead}
+                                    </p>
+                                </div>
+                            </button>
+                        );
+                    }}
+                    itemHeight={ITEM_HEIGHT}
+                    className="min-h-0 flex-1 rounded-lg"
+                />
+            )}
         </div>
     );
 }

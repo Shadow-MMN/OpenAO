@@ -924,66 +924,93 @@ app.delete(
  * va a quedar el mapa antes de publicarlo, sin ninguna pantalla especial.
  */
 app.get("/maps/:mapNum/overrides", async (request, response) => {
-     try {
-         const mapNum = Number.parseInt(request.params.mapNum ?? "", 10);
+    try {
+        const mapNum = Number.parseInt(request.params.mapNum ?? "", 10);
 
-         if (!Number.isInteger(mapNum) || mapNum <= 0) {
-             response.status(400).json({ error: "Numero de mapa invalido." });
-             return;
-         }
+        if (!Number.isInteger(mapNum) || mapNum <= 0) {
+            response.status(400).json({ error: "Numero de mapa invalido." });
+            return;
+        }
 
-         let includeDrafts = false;
+        let includeDrafts = false;
 
-         try {
-             const authorized = await getAuthorizedSession(request);
-             includeDrafts = Boolean(
-                 authorized && isAuthorizedGameDataAdmin(authorized.session),
-             );
-         } catch {
-             // Sin sesion valida se sirve lo publicado, que es el caso normal.
-         }
+        try {
+            const authorized = await getAuthorizedSession(request);
+            includeDrafts = Boolean(
+                authorized && isAuthorizedGameDataAdmin(authorized.session),
+            );
+        } catch {
+            // Sin sesion valida se sirve lo publicado, que es el caso normal.
+        }
 
-         response.json({
-             mapNum,
-             includeDrafts,
-             overrides: await listMapOverrides(mapNum, includeDrafts),
-             entities: await listMapTileEntities(mapNum, includeDrafts),
-         });
-     } catch (error) {
-         const message =
-             error instanceof Error ? error.message : "Unexpected error";
-         response.status(400).json({ error: message });
-     }
- });
+        response.json({
+            mapNum,
+            includeDrafts,
+            overrides: await listMapOverrides(mapNum, includeDrafts),
+            entities: await listMapTileEntities(mapNum, includeDrafts),
+        });
+    } catch (error) {
+        const message =
+            error instanceof Error ? error.message : "Unexpected error";
+        response.status(400).json({ error: message });
+    }
+});
 
- /** Overrides y entidades de un mapa con sesion de admin (editor visual). */
- app.get(
-     "/admin/game-data/maps/:mapNum/overrides",
-     async (request, response) => {
-         try {
-             const authorized = await requireAdminEmailSession(request, response);
-             if (!authorized) return;
+/**
+ * Overrides y entidades de un mapa para el editor visual.
+ *
+ * Existe aparte del endpoint publico porque el editor necesita que "sin
+ * permiso" sea un error explicito: la ruta publica degrada a lo publicado y el
+ * editor mostraria un mapa sin borradores como si estuviera todo bien.
+ */
+app.get(
+    "/admin/game-data/maps/:mapNum/overrides",
+    async (request, response) => {
+        try {
+            const authorized = await requireAdminEmailSession(
+                request,
+                response,
+            );
+            if (!authorized) return;
 
-             const mapNum = Number.parseInt(request.params.mapNum ?? "", 10);
+            const mapNum = Number.parseInt(request.params.mapNum ?? "", 10);
 
-             if (!Number.isInteger(mapNum) || mapNum <= 0) {
-                 response.status(400).json({ error: "Numero de mapa invalido." });
-                 return;
-             }
+            if (!Number.isInteger(mapNum) || mapNum <= 0) {
+                response.status(400).json({ error: "Numero de mapa invalido." });
+                return;
+            }
 
-             response.json({
-                 mapNum,
-                 includeDrafts: true,
-                 overrides: await listMapOverrides(mapNum, true),
-                 entities: await listMapTileEntities(mapNum, true),
-             });
-         } catch (error) {
-             const message =
-                 error instanceof Error ? error.message : "Unexpected error";
-             response.status(400).json({ error: message });
-         }
-     },
- );
+            response.json({
+                mapNum,
+                includeDrafts: true,
+                overrides: await listMapOverrides(mapNum, true),
+                entities: await listMapTileEntities(mapNum, true),
+            });
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : "Unexpected error";
+            response.status(400).json({ error: message });
+        }
+    },
+);
+
+/**
+ * Responde si la sesion actual puede usar el modo construccion.
+ *
+ * El frontend lo necesita para no ofrecer el editor a quien no puede entrar:
+ * la sesion publica no expone si la cuenta es admin de game-data, y adivinarlo
+ * desde el cliente significaria filtrar el email de admin al navegador.
+ */
+app.get("/admin/game-data/session", async (request, response) => {
+    const authorized = await requireAdminEmailSession(request, response);
+
+    if (!authorized) return;
+
+    response.json({
+        isGameDataAdmin: true,
+        accountId: authorized.session.account._id,
+    });
+});
 
 /** Publica los borradores de un mapa. A partir de aca los ven los jugadores. */
 app.post("/admin/game-data/maps/:mapNum/publish", async (request, response) => {

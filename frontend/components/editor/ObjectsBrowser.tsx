@@ -8,7 +8,6 @@ import GraphicPreview from "./GraphicPreview";
 import VirtualizedList from "./VirtualizedList";
 
 const ITEM_HEIGHT = 56;
-const MIN_OBJECTS_WITH_FILTER = 900;
 
 /**
  * Catalogo de objetos del juego con busqueda y filtro por tipo.
@@ -21,6 +20,18 @@ export default function ObjectsBrowser() {
     const [search, setSearch] = useState("");
     const [objTypeFilter, setObjTypeFilter] = useState<number | null>(null);
     const normalizedSearch = search.trim().toLowerCase();
+
+    // Un recorrido por tipo y no un filter por chip: son 37 chips sobre mil
+    // objetos, y se recalculaba entero en cada tecla de la busqueda.
+    const countsByType = useMemo(() => {
+        const counts = new Map<number, number>();
+
+        for (const entry of objects) {
+            counts.set(entry.objType, (counts.get(entry.objType) ?? 0) + 1);
+        }
+
+        return counts;
+    }, [objects]);
 
     const filteredObjects = useMemo(() => {
         let result = objects;
@@ -63,7 +74,7 @@ export default function ObjectsBrowser() {
                 className="w-full rounded-lg border border-white/10 bg-stone-950/60 px-3 py-2 text-xs text-stone-200 placeholder:text-stone-500 focus:border-amber-400/50 focus:outline-none"
             />
 
-            {objects.length >= MIN_OBJECTS_WITH_FILTER ? (
+            {objects.length > 0 ? (
                 <div className="flex flex-wrap gap-1">
                     <button
                         type="button"
@@ -77,9 +88,7 @@ export default function ObjectsBrowser() {
                         Todos ({objects.length})
                     </button>
                     {OBJECT_TYPES.map((entry) => {
-                        const count = objects.filter(
-                            (item) => item.objType === entry.id,
-                        ).length;
+                        const count = countsByType.get(entry.id) ?? 0;
 
                         if (count === 0) {
                             return null;
@@ -110,50 +119,56 @@ export default function ObjectsBrowser() {
                 </div>
             ) : null}
 
-            <VirtualizedList
-                items={filteredObjects}
-                getItemKey={(entry) => entry.id}
-                renderItem={(entry) => {
-                    const type = getObjectType(entry.objType);
-                    const isSelected = selectedId === entry.id;
+            {filteredObjects.length === 0 ? (
+                <p className="flex flex-1 items-center justify-center text-[11px] text-stone-500">
+                    Ningun objeto coincide con la busqueda.
+                </p>
+            ) : (
+                <VirtualizedList
+                    items={filteredObjects}
+                    getItemKey={(entry) => entry.id}
+                    renderItem={(entry) => {
+                        const type = getObjectType(entry.objType);
+                        const isSelected = selectedId === entry.id;
 
-                    return (
-                        <button
-                            type="button"
-                            onClick={() => handleSelect(entry)}
-                            className={`flex h-[52px] w-full items-center gap-2 rounded-lg border px-2 text-left transition ${
-                                isSelected
-                                    ? "border-amber-400/70 bg-amber-400/15"
-                                    : "border-transparent bg-stone-950/40 hover:border-white/10 hover:bg-stone-900/70"
-                            }`}
-                        >
-                            <GraphicPreview
-                                grhIndex={entry.grhIndex}
-                                size={44}
-                                scale={1.6}
-                            />
-                            <div className="min-w-0 flex-1">
-                                <p className="truncate text-xs font-medium text-stone-200">
-                                    {entry.name}
-                                </p>
-                                <p className="flex items-center gap-1.5 text-[10px] text-stone-500">
-                                    <span
-                                        className="inline-block h-1.5 w-1.5 rounded-full"
-                                        style={{
-                                            backgroundColor:
-                                                type?.color ?? "#78716c",
-                                        }}
-                                    />
-                                    #{entry.id}
-                                    {type ? ` - ${type.label}` : ""}
-                                </p>
-                            </div>
-                        </button>
-                    );
-                }}
-                itemHeight={ITEM_HEIGHT}
-                className="min-h-0 flex-1 rounded-lg"
-            />
+                        return (
+                            <button
+                                type="button"
+                                onClick={() => handleSelect(entry)}
+                                className={`flex h-[52px] w-full items-center gap-2 rounded-lg border px-2 text-left transition ${
+                                    isSelected
+                                        ? "border-amber-400/70 bg-amber-400/15"
+                                        : "border-transparent bg-stone-950/40 hover:border-white/10 hover:bg-stone-900/70"
+                                }`}
+                            >
+                                <GraphicPreview
+                                    grhIndex={entry.grhIndex}
+                                    size={44}
+                                    scale={1.6}
+                                />
+                                <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs font-medium text-stone-200">
+                                        {entry.name}
+                                    </p>
+                                    <p className="flex items-center gap-1.5 text-[10px] text-stone-500">
+                                        <span
+                                            className="inline-block h-1.5 w-1.5 rounded-full"
+                                            style={{
+                                                backgroundColor:
+                                                    type?.color ?? "#78716c",
+                                            }}
+                                        />
+                                        #{entry.id}
+                                        {type ? ` - ${type.label}` : ""}
+                                    </p>
+                                </div>
+                            </button>
+                        );
+                    }}
+                    itemHeight={ITEM_HEIGHT}
+                    className="min-h-0 flex-1 rounded-lg"
+                />
+            )}
         </div>
     );
 }

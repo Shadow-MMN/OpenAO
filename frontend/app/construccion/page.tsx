@@ -2,7 +2,9 @@
 
 import { Suspense, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { EditorStoreProvider, useEditorStore } from "../../lib/editor/editorStore";
+import { useGameDataAdmin } from "../../lib/editor/useGameDataAdmin";
 import EditorToolbar from "../../components/editor/EditorToolbar";
 import RecentsStrip from "../../components/editor/RecentsStrip";
 import TerrainPalette from "../../components/editor/TerrainPalette";
@@ -103,6 +105,48 @@ function ConstruccionEditor() {
 }
 
 export default function ConstruccionPage() {
+    const adminState = useGameDataAdmin();
+
+    if (adminState === "loading") {
+        return (
+            <div className="mx-auto max-w-[1400px] px-4 py-10 text-xs text-stone-500">
+                Verificando permisos...
+            </div>
+        );
+    }
+
+    // El editor no se monta sin permiso: si lo hiciera, cada panel pediria su
+    // catalogo para recibir un 403 y la pantalla quedaria vacia sin explicar
+    // por que.
+    if (adminState === "denied") {
+        return (
+            <div className="mx-auto max-w-md px-4 py-16 text-center">
+                <h1 className="text-lg font-semibold text-stone-100">
+                    Modo construccion
+                </h1>
+                <p className="mt-2 text-[12px] leading-relaxed text-stone-400">
+                    Esta seccion es solo para las cuentas con permiso de
+                    edicion de mapas. Si deberias tenerlo, pedile a un
+                    administrador que agregue tu correo a la lista.
+                </p>
+                <div className="mt-6 flex justify-center gap-2">
+                    <Link
+                        href="/login"
+                        className="rounded-xl border border-white/10 px-4 py-2 text-xs text-stone-200 transition hover:bg-white/5"
+                    >
+                        Ingresar con otra cuenta
+                    </Link>
+                    <Link
+                        href="/"
+                        className="rounded-xl border border-white/10 px-4 py-2 text-xs text-stone-200 transition hover:bg-white/5"
+                    >
+                        Volver al inicio
+                    </Link>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <EditorStoreProvider>
             <Suspense fallback={null}>

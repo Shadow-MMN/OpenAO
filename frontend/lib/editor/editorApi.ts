@@ -113,7 +113,9 @@ async function requestJson<T>(
     init?: RequestInit,
 ): Promise<{ status: number; ok: boolean; data: T }> {
     const response = await fetch(path, init);
-    const data = (await response.json().catch(() => null)) as T;
+    // Un cuerpo vacio o no-JSON no debe convertirse en un TypeError al leer
+    // `data.error`: todos los llamadores esperan un objeto.
+    const data = ((await response.json().catch(() => null)) ?? {}) as T;
     return { status: response.status, ok: response.ok, data };
 }
 
@@ -305,9 +307,16 @@ export async function uploadGraphicPng(
     return response.data as UploadedGraphic;
 }
 
+/**
+ * Ediciones del mapa para el editor.
+ *
+ * Usa la ruta de admin y no la publica a proposito: la publica degrada a lo
+ * publicado cuando falta permiso o la API no responde, y el editor abriria un
+ * mapa sin borradores como si estuviera todo en orden.
+ */
 export async function getMapOverrides(mapNum: number): Promise<MapOverridesResponse> {
     const response = await requestJson<MapOverridesResponse | { error: string }>(
-        `/api/maps/${mapNum}/overrides`,
+        editorPath(`maps/${mapNum}/overrides`),
     );
 
     if (!response.ok) {
@@ -318,4 +327,24 @@ export async function getMapOverrides(mapNum: number): Promise<MapOverridesRespo
     }
 
     return response.data as MapOverridesResponse;
+}
+
+/**
+ * Si la cuenta actual puede usar el modo construccion.
+ *
+ * La sesion publica no dice si la cuenta es admin de game-data, y compararlo en
+ * el cliente exigiria mandarle el email de admin al navegador. Preguntar a la
+ * API deja el dato del lado del servidor.
+ */
+export async function isGameDataAdmin(): Promise<boolean> {
+    try {
+        const response = await requestJson<{ isGameDataAdmin?: boolean }>(
+            editorPath("session"),
+        );
+
+        return response.ok && response.data.isGameDataAdmin === true;
+    } catch {
+        // Sin red se asume que no hay permiso: es el caso seguro.
+        return false;
+    }
 }

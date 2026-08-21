@@ -11,6 +11,13 @@ import {
 const CURRENT_EXP_MULTIPLIER = 5;
 const CURRENT_GOLD_MULTIPLIER = 3;
 
+/**
+ * Tamano de pagina cuando se pide el catalogo entero. Es un techo, no un
+ * objetivo: el catalogo real ronda los 340 NPCs y esto solo evita que un
+ * `all=true` se convierta en una consulta sin limite.
+ */
+const FULL_CATALOG_PAGE_SIZE = 10_000;
+
 type GameNpcRow = {
     id: number;
     name: string;
@@ -87,36 +94,39 @@ const gameNpcSchema = z
     })
     .catchall(z.unknown());
 
+/** Bandera booleana que llega como query string ("true", "1", ausente...). */
+const queryFlagSchema = z.preprocess((value) => {
+    const raw = Array.isArray(value) ? value[0] : value;
+    if (raw === true || raw === "true" || raw === "1") {
+        return true;
+    }
+    if (
+        raw === false ||
+        raw === "false" ||
+        raw === "0" ||
+        raw == null ||
+        raw === ""
+    ) {
+        return false;
+    }
+    return raw;
+}, z.boolean().optional());
+
 const listFiltersSchema = z.object({
     search: z.string().trim().optional(),
     npcType: z.coerce.number().int().optional(),
-    hostileOnly: z.preprocess((value) => {
-        const raw = Array.isArray(value) ? value[0] : value;
-        if (raw === true || raw === "true" || raw === "1") {
-            return true;
-        }
-        if (
-            raw === false ||
-            raw === "false" ||
-            raw === "0" ||
-            raw == null ||
-            raw === ""
-        ) {
-            return false;
-        }
-        return raw;
-    }, z.boolean().optional()),
+    hostileOnly: queryFlagSchema,
     sortBy: z
         .enum(["id", "expPerHp", "expReward", "goldReward", "maxHp"])
         .optional(),
     sortDirection: z.enum(["asc", "desc"]).optional(),
-limit: z.coerce.number().int().min(1).max(200).optional(),
-  page: z.coerce.number().int().min(1).optional(),
-  /**
-   * Devuelve el catalogo completo en una sola pagina. El editor visual lo
-   * necesita para buscar y filtrar del lado del cliente sobre los 340 NPCs.
-   */
-  all: z.preprocess((value) => value === true || value === "true", z.boolean().optional()),
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+    page: z.coerce.number().int().min(1).optional(),
+    /**
+     * Devuelve el catalogo completo en una sola pagina. El editor visual lo
+     * necesita para buscar y filtrar del lado del cliente sobre los 340 NPCs.
+     */
+    all: queryFlagSchema,
 });
 
 function isHostileNpc(data: GameNpcRecordData): boolean {
@@ -310,7 +320,7 @@ export async function listGameNpcs(filters: unknown) {
     const parsed = listFiltersSchema.parse(filters ?? {});
     const values: Array<string | number> = [];
     const conditions: string[] = [];
-    const pageSize = parsed.all ? 100_000 : (parsed.limit ?? 100);
+    const pageSize = parsed.all ? FULL_CATALOG_PAGE_SIZE : (parsed.limit ?? 100);
     const page = parsed.all ? 1 : (parsed.page ?? 1);
     const offset = (page - 1) * pageSize;
 

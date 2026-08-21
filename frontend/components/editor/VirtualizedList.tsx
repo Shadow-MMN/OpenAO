@@ -7,20 +7,24 @@ type VirtualizedListProps<T> = {
     getItemKey: (item: T, index: number) => string | number;
     renderItem: (item: T, index: number) => ReactNode;
     itemHeight?: number;
+    /** Items por fila. Con 1 es una lista; con mas, una grilla virtualizada. */
+    columns?: number;
     overscan?: number;
     className?: string;
 };
 
 /**
- * Lista virtualizada generica sin dependencias: solo renderiza los items
- * visibles. Los catalogos del editor superan los mil elementos, y el navegador
- * no debe crear un nodo DOM por cada uno.
+ * Lista (o grilla) virtualizada sin dependencias: solo renderiza las filas
+ * visibles. Los catalogos del editor superan los mil elementos y la paleta de
+ * un mapa las ochocientas entradas, y el navegador no debe crear un nodo DOM
+ * -ni una miniatura- por cada uno.
  */
 export default function VirtualizedList<T>({
     items,
     getItemKey,
     renderItem,
     itemHeight = 72,
+    columns = 1,
     overscan = 6,
     className = "",
 }: VirtualizedListProps<T>) {
@@ -40,24 +44,29 @@ export default function VirtualizedList<T>({
         };
 
         updateHeight();
-        window.addEventListener("resize", updateHeight);
+
+        // El alto no depende solo de la ventana: filtrar reacomoda los chips de
+        // arriba y el viewport cambia de alto sin ningun resize del navegador.
+        const observer = new ResizeObserver(updateHeight);
+        observer.observe(viewport);
 
         return () => {
-            window.removeEventListener("resize", updateHeight);
+            observer.disconnect();
         };
     }, []);
 
-    const totalHeight = items.length * itemHeight;
-    const startIndex = Math.max(
-        0,
-        Math.floor(scrollTop / itemHeight) - overscan,
-    );
-    const visibleCount = Math.ceil(viewportHeight / itemHeight) + overscan * 2;
-    const endIndex = Math.min(items.length, startIndex + visibleCount);
-    const visibleItems: Array<{ item: T; index: number }> = [];
+    const columnCount = Math.max(1, Math.floor(columns));
+    const rowCount = Math.ceil(items.length / columnCount);
+    const totalHeight = rowCount * itemHeight;
+    const startRow = Math.max(0, Math.floor(scrollTop / itemHeight) - overscan);
+    const visibleRowCount =
+        Math.ceil(Math.max(viewportHeight, itemHeight) / itemHeight) +
+        overscan * 2;
+    const endRow = Math.min(rowCount, startRow + visibleRowCount);
+    const visibleRows: Array<{ row: number; startIndex: number }> = [];
 
-    for (let index = startIndex; index < endIndex; index += 1) {
-        visibleItems.push({ item: items[index], index });
+    for (let row = startRow; row < endRow; row += 1) {
+        visibleRows.push({ row, startIndex: row * columnCount });
     }
 
     return (
@@ -67,18 +76,29 @@ export default function VirtualizedList<T>({
             onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
         >
             <div style={{ height: totalHeight, position: "relative" }}>
-                {visibleItems.map(({ item, index }) => (
+                {visibleRows.map(({ row, startIndex }) => (
                     <div
-                        key={getItemKey(item, index)}
+                        key={row}
                         style={{
                             position: "absolute",
-                            top: index * itemHeight,
+                            top: row * itemHeight,
                             left: 0,
                             right: 0,
                             height: itemHeight,
+                            display: "grid",
+                            gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
                         }}
                     >
-                        {renderItem(item, index)}
+                        {Array.from(
+                            { length: columnCount },
+                            (_, column) => startIndex + column,
+                        )
+                            .filter((index) => index < items.length)
+                            .map((index) => (
+                                <div key={getItemKey(items[index], index)}>
+                                    {renderItem(items[index], index)}
+                                </div>
+                            ))}
                     </div>
                 ))}
             </div>

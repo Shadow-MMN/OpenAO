@@ -1,12 +1,17 @@
 "use client";
 
-import { useState } from "react";
-import { useEditorStore } from "../../lib/editor/editorStore";
+import { useEffect, useState } from "react";
+import {
+    createTerrainBrush,
+    useEditorStore,
+} from "../../lib/editor/editorStore";
 import {
     discardMapDrafts,
     publishMapChanges,
     revertMapChanges,
 } from "../../lib/editor/editorApi";
+
+type EditorAction = "publish" | "discard" | "revert";
 
 /**
  * Barra de herramientas del editor: seleccion de herramienta, accion de
@@ -25,20 +30,35 @@ export default function EditorToolbar() {
         objects,
         npcs,
     } = useEditorStore();
-    const [isBusy, setIsBusy] = useState<"publish" | "discard" | "revert" | null>(
+    const [isBusy, setIsBusy] = useState<EditorAction | null>(null);
+    const [pendingAction, setPendingAction] = useState<EditorAction | null>(
         null,
     );
     const [error, setError] = useState<string | null>(null);
 
-    const runAction = async (
-        action: "publish" | "discard" | "revert",
-        callback: () => Promise<unknown>,
-    ) => {
+    const draftTiles = status?.draft ?? 0;
+    const draftEntities = status?.draftEntities ?? 0;
+    const publishedTiles = status?.published ?? 0;
+    const publishedEntities = status?.publishedEntities ?? 0;
+    // Las entidades cuentan igual que los tiles: un mapa cuyo unico cambio es un
+    // NPC colocado sigue teniendo trabajo sin publicar.
+    const draftTotal = draftTiles + draftEntities;
+    const hasAnything =
+        draftTotal + publishedTiles + publishedEntities > 0;
+
+    const runAction = async (action: EditorAction) => {
         setIsBusy(action);
         setError(null);
 
         try {
-            await callback();
+            if (action === "publish") {
+                await publishMapChanges(mapNum);
+            } else if (action === "discard") {
+                await discardMapDrafts(mapNum);
+            } else {
+                await revertMapChanges(mapNum);
+            }
+
             await refreshMapData();
             await refreshStatus();
         } catch (actionError) {
@@ -51,15 +71,6 @@ export default function EditorToolbar() {
             setIsBusy(null);
         }
     };
-
-    const handlePublish = () =>
-        runAction("publish", () => publishMapChanges(mapNum));
-
-    const handleDiscard = () =>
-        runAction("discard", () => discardMapDrafts(mapNum));
-
-    const handleRevert = () =>
-        runAction("revert", () => revertMapChanges(mapNum));
 
     const toolButtons: Array<{
         key: string;
@@ -74,24 +85,19 @@ export default function EditorToolbar() {
             icon: "◫",
             isActive: tool?.kind === "terrain",
             onClick: () => {
-                const firstEntry =
-                    terrain?.palette.find((entry) =>
-                        entry.graphics.some(
-                            (graphic) =>
-                                typeof graphic === "number" && graphic > 0,
-                        ),
-                    ) ?? null;
-                const grhIndex =
-                    firstEntry?.graphics.find(
-                        (graphic): graphic is number =>
+                const firstEntry = terrain?.palette.find((entry) =>
+                    entry.graphics.some(
+                        (graphic) =>
                             typeof graphic === "number" && graphic > 0,
-                    ) ?? 1;
+                    ),
+                );
 
-                setTool({
-                    kind: "terrain",
-                    paletteId: firstEntry?.id ?? 1,
-                    grhIndex,
-                });
+                if (firstEntry) {
+                    setTool({
+                        kind: "terrain",
+                        ...createTerrainBrush(firstEntry),
+                    });
+                }
             },
         },
         {
@@ -128,8 +134,6 @@ export default function EditorToolbar() {
             onClick: () => setTool({ kind: "erase" }),
         },
     ];
-
-    const draftCount = status?.draft ?? 0;
 
     return (
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-stone-950/70 px-4 py-3 backdrop-blur-md">
@@ -181,25 +185,25 @@ export default function EditorToolbar() {
             <div className="flex items-center gap-1.5">
                 <button
                     type="button"
-                    onClick={() => void handlePublish()}
-                    disabled={isBusy !== null}
-                    className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 px-3 py-1.5 text-xs font-medium text-emerald-200 transition hover:bg-emerald-400/20 disabled:opacity-50"
+                    onClick={() => setPendingAction("publish")}
+                    disabled={isBusy !== null || draftTotal === 0}
+                    className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 px-3 py-1.5 text-xs font-medium text-emerald-200 transition hover:bg-emerald-400/20 disabled:opacity-40"
                 >
                     {isBusy === "publish" ? "Publicando..." : "Publicar"}
                 </button>
                 <button
                     type="button"
-                    onClick={() => void handleDiscard()}
-                    disabled={isBusy !== null || draftCount === 0}
+                    onClick={() => setPendingAction("discard")}
+                    disabled={isBusy !== null || draftTotal === 0}
                     className="rounded-lg border border-red-400/40 bg-red-400/10 px-3 py-1.5 text-xs font-medium text-red-200 transition hover:bg-red-400/20 disabled:opacity-40"
                 >
                     {isBusy === "discard" ? "Descartando..." : "Descartar borradores"}
                 </button>
                 <button
                     type="button"
-                    onClick={() => void handleRevert()}
-                    disabled={isBusy !== null}
-                    className="rounded-lg border border-white/10 bg-stone-950/60 px-3 py-1.5 text-xs font-medium text-stone-300 transition hover:border-white/25 hover:text-stone-100 disabled:opacity-50"
+                    onClick={() => setPendingAction("revert")}
+                    disabled={isBusy !== null || !hasAnything}
+                    className="rounded-lg border border-white/10 bg-stone-950/60 px-3 py-1.5 text-xs font-medium text-stone-300 transition hover:border-white/25 hover:text-stone-100 disabled:opacity-40"
                 >
                     {isBusy === "revert" ? "Revirtiendo..." : "Revertir"}
                 </button>
@@ -209,20 +213,26 @@ export default function EditorToolbar() {
                 <span>
                     Publicados:{" "}
                     <span className="font-medium text-emerald-300">
-                        {status?.published ?? 0}
+                        {publishedTiles}
                     </span>
                 </span>
                 <span>
                     Borradores:{" "}
                     <span className="font-medium text-amber-300">
-                        {status?.draft ?? 0}
+                        {draftTiles}
                     </span>
                 </span>
                 <span>
                     Entidades:{" "}
                     <span className="font-medium text-stone-200">
-                        {status?.publishedEntities ?? 0}
+                        {publishedEntities}
                     </span>
+                    {draftEntities > 0 ? (
+                        <span className="font-medium text-amber-300">
+                            {" "}
+                            (+{draftEntities})
+                        </span>
+                    ) : null}
                 </span>
             </div>
 
@@ -231,6 +241,123 @@ export default function EditorToolbar() {
                     {error}
                 </p>
             ) : null}
+
+            {pendingAction ? (
+                <ConfirmDialog
+                    action={pendingAction}
+                    mapNum={mapNum}
+                    draftTiles={draftTiles}
+                    draftEntities={draftEntities}
+                    publishedTiles={publishedTiles}
+                    publishedEntities={publishedEntities}
+                    onCancel={() => setPendingAction(null)}
+                    onConfirm={() => {
+                        const action = pendingAction;
+                        setPendingAction(null);
+                        void runAction(action);
+                    }}
+                />
+            ) : null}
+        </div>
+    );
+}
+
+/**
+ * Confirmacion de las tres acciones que no se pueden deshacer.
+ *
+ * Publicar cambia lo que ven los jugadores y revertir borra tambien lo ya
+ * publicado, asi que ninguna de las dos deberia depender de no errarle al boton.
+ */
+function ConfirmDialog({
+    action,
+    mapNum,
+    draftTiles,
+    draftEntities,
+    publishedTiles,
+    publishedEntities,
+    onCancel,
+    onConfirm,
+}: {
+    action: EditorAction;
+    mapNum: number;
+    draftTiles: number;
+    draftEntities: number;
+    publishedTiles: number;
+    publishedEntities: number;
+    onCancel: () => void;
+    onConfirm: () => void;
+}) {
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                onCancel();
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [onCancel]);
+
+    const copy = {
+        publish: {
+            title: `Publicar los cambios del mapa ${mapNum}`,
+            body: `Los jugadores van a ver ${draftTiles} tiles y ${draftEntities} entidades en cuanto entren al mapa. Publicar no se puede deshacer desde aca: para volver atras hay que revertir el mapa entero.`,
+            confirmLabel: "Publicar",
+            confirmClass:
+                "border-emerald-400/50 bg-emerald-400/15 text-emerald-200 hover:bg-emerald-400/25",
+        },
+        discard: {
+            title: "Descartar los borradores",
+            body: `Se van a borrar ${draftTiles} tiles y ${draftEntities} entidades sin publicar. Lo ya publicado no se toca.`,
+            confirmLabel: "Descartar",
+            confirmClass:
+                "border-red-400/50 bg-red-400/15 text-red-200 hover:bg-red-400/25",
+        },
+        revert: {
+            title: `Revertir el mapa ${mapNum} a su estado original`,
+            body: `Se borra todo lo pintado en este mapa: ${publishedTiles} tiles y ${publishedEntities} entidades publicadas, mas ${draftTiles} tiles y ${draftEntities} entidades en borrador. No se puede deshacer.`,
+            confirmLabel: "Revertir todo",
+            confirmClass:
+                "border-red-400/50 bg-red-400/15 text-red-200 hover:bg-red-400/25",
+        },
+    }[action];
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="editor-confirm-title"
+        >
+            <div className="w-full max-w-md rounded-2xl border border-white/10 bg-stone-950 p-5 shadow-2xl">
+                <h2
+                    id="editor-confirm-title"
+                    className="text-sm font-semibold text-stone-100"
+                >
+                    {copy.title}
+                </h2>
+                <p className="mt-2 text-[12px] leading-relaxed text-stone-400">
+                    {copy.body}
+                </p>
+                <div className="mt-5 flex justify-end gap-2">
+                    <button
+                        type="button"
+                        onClick={onCancel}
+                        className="rounded-lg border border-white/10 bg-stone-950/60 px-3 py-1.5 text-xs text-stone-300 transition hover:border-white/25 hover:text-stone-100"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        type="button"
+                        autoFocus
+                        onClick={onConfirm}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${copy.confirmClass}`}
+                    >
+                        {copy.confirmLabel}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }

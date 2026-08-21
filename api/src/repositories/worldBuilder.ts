@@ -635,10 +635,13 @@ export type TerrainPaletteEntry = {
     blocked: boolean;
 };
 
+/** Cuantos graficos subidos entran en la paleta del editor. */
+const MAX_PALETTE_UPLOADED_GRAPHICS = 500;
+
 export type TerrainPaletteResult = {
     mapNum: number;
     palette: TerrainPaletteEntry[];
-    uploaded: UploadedGraphic[];
+    uploadedGraphics: UploadedGraphic[];
 };
 
 /**
@@ -697,6 +700,6 @@ export async function getMapTerrainPalette(
     return {
         mapNum,
         palette,
-        uploaded: await listGraphics(500),
+        uploadedGraphics: await listGraphics(MAX_PALETTE_UPLOADED_GRAPHICS),
     };
 }

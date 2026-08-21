@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Application, Sprite, Texture } from "pixi.js";
 import type { GraphicsDB } from "../../types/game";
-import { loadGraphicsDB } from "../../utils/gameLoader";
-import { loadGraphicTexture, resolveGraphicFrame } from "../../lib/graphicTextures";
+import {
+    getSharedGraphicsDB,
+    loadGraphicImage,
+    resolveGraphicFrame,
+} from "../../lib/graphicTextures";
 
 type GraphicPreviewProps = {
     grhIndex: number;
@@ -14,8 +16,13 @@ type GraphicPreviewProps = {
 };
 
 /**
- * Miniatura de un grafico del motor. Resuelve el frame desde el catalogo de
- * graficos y lo pinta centrado en un lienzo pequeno.
+ * Miniatura de un grafico del motor: resuelve el frame en el catalogo y recorta
+ * el sprite del PNG fuente sobre un canvas 2D.
+ *
+ * Deliberadamente no usa PixiJS. Una `Application` por miniatura significa un
+ * contexto WebGL por miniatura, y el navegador mantiene vivos apenas unos
+ * quince: la paleta de un mapa tiene cientos de entradas y las ultimas
+ * quedarian en blanco.
  */
 export default function GraphicPreview({
     grhIndex,
@@ -23,13 +30,13 @@ export default function GraphicPreview({
     scale = 2,
     className = "",
 }: GraphicPreviewProps) {
-    const hostRef = useRef<HTMLDivElement | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const [graphicsDB, setGraphicsDB] = useState<GraphicsDB | null>(null);
 
     useEffect(() => {
         let cancelled = false;
 
-        loadGraphicsDB()
+        getSharedGraphicsDB()
             .then((db) => {
                 if (!cancelled) {
                     setGraphicsDB(db);
@@ -45,85 +52,83 @@ export default function GraphicPreview({
     }, []);
 
     useEffect(() => {
-        let disposed = false;
-        let app: Application | null = null;
-        let texture: Texture | null = null;
-        const host = hostRef.current;
+        const canvas = canvasRef.current;
 
-        if (!host || !graphicsDB || grhIndex <= 0) {
+        if (!canvas) {
             return;
         }
 
-        void (async () => {
-            const graphic = resolveGraphicFrame(graphicsDB, grhIndex, "2");
+        const context = canvas.getContext("2d");
 
-            if (!graphic) {
-                return;
-            }
+        if (!context) {
+            return;
+        }
 
-            try {
-                texture = await loadGraphicTexture(graphic);
-            } catch {
-                return;
-            }
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.round(size * ratio);
+        canvas.height = Math.round(size * ratio);
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        context.clearRect(0, 0, size, size);
 
-            if (disposed) {
-                texture.destroy();
-                return;
-            }
+        if (!graphicsDB || grhIndex <= 0) {
+            return;
+        }
 
-            app = new Application();
-            await app.init({
-                width: size,
-                height: size,
-                antialias: false,
-                backgroundAlpha: 0,
-                autoStart: false,
+        const graphic = resolveGraphicFrame(graphicsDB, grhIndex, "2");
+
+        if (!graphic) {
+            return;
+        }
+
+        let cancelled = false;
+
+        void loadGraphicImage(graphic.numFile)
+            .then((image) => {
+                if (cancelled) {
+                    return;
+                }
+
+                const frameWidth = Math.max(1, graphic.width);
+                const frameHeight = Math.max(1, graphic.height);
+                // El sprite se agranda hasta `scale` pero nunca desborda el
+                // recuadro: los graficos del juego van de 32x32 a varios tiles.
+                const drawScale = Math.min(
+                    scale,
+                    size / frameWidth,
+                    size / frameHeight,
+                );
+                const drawWidth = Math.max(1, Math.round(frameWidth * drawScale));
+                const drawHeight = Math.max(
+                    1,
+                    Math.round(frameHeight * drawScale),
+                );
+
+                context.imageSmoothingEnabled = false;
+                context.drawImage(
+                    image,
+                    graphic.sX,
+                    graphic.sY,
+                    frameWidth,
+                    frameHeight,
+                    Math.round((size - drawWidth) / 2),
+                    Math.round((size - drawHeight) / 2),
+                    drawWidth,
+                    drawHeight,
+                );
+            })
+            .catch(() => {
+                // Un grafico que no resuelve deja el recuadro vacio.
             });
 
-            if (disposed) {
-                app.destroy(undefined, { children: true });
-                return;
-            }
-
-            host.innerHTML = "";
-            host.appendChild(app.canvas);
-            app.canvas.style.width = `${size}px`;
-            app.canvas.style.height = `${size}px`;
-
-            const sprite = new Sprite(texture);
-            const fitScale = Math.min(
-                size / Math.max(1, texture.width),
-                size / Math.max(1, texture.height),
-            );
-            sprite.scale.set(Math.min(scale, fitScale));
-            sprite.anchor.set(0.5, 0.5);
-            sprite.position.set(size / 2, size / 2);
-            app.stage.addChild(sprite);
-            app.renderer.render(app.stage);
-        })();
-
         return () => {
-            disposed = true;
-
-            if (texture) {
-                texture.destroy();
-            }
-
-            if (app) {
-                app.destroy(undefined, { children: true });
-            }
-
-            if (host) {
-                host.innerHTML = "";
-            }
+            cancelled = true;
         };
     }, [graphicsDB, grhIndex, scale, size]);
 
     return (
-        <div
-            ref={hostRef}
-            className={`flex shrink-0 items-center justify-center ${className}`}
+        <canvas
+            ref={canvasRef}
+            className={`shrink-0 ${className}`}
             style={{ width: size, height: size }}
         />
     );
