@@ -62,21 +62,38 @@ export default function NpcsBrowser() {
 
     const selectedId = tool?.kind === "npc" ? tool.npc.id : null;
 
-    const handleSelect = (entry: EditorNpc) => {
+    const handleSelect = async (entry: EditorNpc) => {
+        // La herramienta se activa ya: pintar no tiene por que esperar a que
+        // carguen los catalogos.
         setTool({ kind: "npc", npc: entry });
-        addRecent({
-            kind: "npc",
-            id: entry.id,
-            // El grafico, no `idHead`: son numeraciones distintas y los
-            // recientes dibujan la miniatura con este valor.
-            grhIndex: resolveCharacterThumbnailGrh(
-                bodiesDB,
-                headsDB,
-                entry.idBody,
-                entry.idHead,
-            ),
-            name: entry.name,
-        });
+
+        try {
+            // Los catalogos se piden aca en vez de leerse del estado. Un click
+            // antes de que terminen de cargar resolveria el grafico en 0, y ese
+            // 0 queda guardado en los recientes: la miniatura quedaria vacia
+            // para siempre, incluso despues de que los catalogos lleguen.
+            const [bodies, heads] = await Promise.all([
+                getSharedBodiesDB(),
+                getSharedHeadsDB(),
+            ]);
+
+            addRecent({
+                kind: "npc",
+                id: entry.id,
+                // El grafico, no `idHead`: son numeraciones distintas y los
+                // recientes dibujan la miniatura con este valor.
+                grhIndex: resolveCharacterThumbnailGrh(
+                    bodies,
+                    heads,
+                    entry.idBody,
+                    entry.idHead,
+                ),
+                name: entry.name,
+            });
+        } catch {
+            // Sin catalogos no hay grafico que guardar, y un reciente que se ve
+            // vacio es peor que no tenerlo.
+        }
     };
 
     return (
@@ -103,7 +120,7 @@ export default function NpcsBrowser() {
                         return (
                             <button
                                 type="button"
-                                onClick={() => handleSelect(entry)}
+                                onClick={() => void handleSelect(entry)}
                                 className={`flex h-[72px] w-full items-center gap-2 rounded-lg border px-2 text-left transition ${
                                     isSelected
                                         ? "border-amber-400/70 bg-amber-400/15"

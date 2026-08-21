@@ -194,3 +194,33 @@ test("catalog flags accept the shapes a query string can produce", async () => {
     assert.equal(falsy.data.objects?.length, 100);
     assert.ok((falsy.data.pagination?.totalPages ?? 0) > 1);
 });
+
+test("unrecognized catalog flags default to false instead of failing", async () => {
+    // Las rutas de catalogo envuelven cualquier error en un 500, asi que un flag
+    // que no se reconoce tiene que valer `false` y no reventar: un `?all=quizas`
+    // es una query mal escrita del cliente, no una falla del servidor.
+    const [objects, npcs, hostile] = await Promise.all([
+        requestJson<{ objects?: unknown[] }>(
+            "/internal/game-data/objects?all=quizas",
+            { headers: { Authorization: API_AUTH } },
+        ),
+        requestJson<{ npcs?: unknown[] }>(
+            "/internal/game-data/npcs?all=quizas",
+            { headers: { Authorization: API_AUTH } },
+        ),
+        requestJson<{ pagination?: { total?: number } }>(
+            "/internal/game-data/npcs?hostileOnly=quizas",
+            { headers: { Authorization: API_AUTH } },
+        ),
+    ]);
+
+    assert.equal(objects.status, 200);
+    assert.equal(objects.data.objects?.length, 100);
+
+    assert.equal(npcs.status, 200);
+    assert.equal(npcs.data.npcs?.length, 100);
+
+    // Sin filtrar: el catalogo entero, no solo los hostiles.
+    assert.equal(hostile.status, 200);
+    assert.ok((hostile.data.pagination?.total ?? 0) > 300);
+});

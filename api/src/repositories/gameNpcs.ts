@@ -94,23 +94,18 @@ const gameNpcSchema = z
     })
     .catchall(z.unknown());
 
-/** Bandera booleana que llega como query string ("true", "1", ausente...). */
+/**
+ * Bandera booleana que llega como query string ("true", "1", ausente...).
+ *
+ * Lo que no se reconoce vale `false`, igual que en el catalogo de objetos: la
+ * ruta envuelve los errores de parseo en un 500, asi que un `?all=quizas`
+ * contestaria una falla del servidor por una query mal escrita.
+ */
 const queryFlagSchema = z.preprocess((value) => {
     const raw = Array.isArray(value) ? value[0] : value;
-    if (raw === true || raw === "true" || raw === "1") {
-        return true;
-    }
-    if (
-        raw === false ||
-        raw === "false" ||
-        raw === "0" ||
-        raw == null ||
-        raw === ""
-    ) {
-        return false;
-    }
-    return raw;
-}, z.boolean().optional());
+
+    return raw === true || raw === "true" || raw === "1";
+}, z.boolean());
 
 const listFiltersSchema = z.object({
     search: z.string().trim().optional(),
